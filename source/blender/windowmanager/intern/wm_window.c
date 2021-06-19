@@ -2406,7 +2406,7 @@ void wm_window_IME_begin(wmWindow *win, int x, int y, int w, int h, bool complet
 {
   BLI_assert(win);
 
-  GHOST_BeginIME(win->ghostwin, x, win->sizey - y, w, h, complete);
+  GHOST_BeginIME(win->ghostwin, x, WM_window_pixels_y(win) - y, w, h, complete);
 }
 
 void wm_window_IME_end(wmWindow *win)

@@ -1969,6 +1969,9 @@ static void widget_draw_text(const uiFontStyle *fstyle,
 
 #ifdef WITH_INPUT_IME
   const wmIMEData *ime_data;
+  bool ime_candidatewin_use_cursor_pos = true;
+  int ime_candidatewin_x;
+  int ime_candidatewin_y;
 #endif
 
   UI_fontstyle_set(fstyle);
@@ -2012,7 +2015,8 @@ static void widget_draw_text(const uiFontStyle *fstyle,
         /* insert composite string into cursor pos */
         BLI_snprintf((char *)drawstr,
                      UI_MAX_DRAW_STR,
-                     "%s%s%s",
+                     "%.*s%s%s",
+                     but->pos,
                      but->editstr,
                      ime_data->str_composite,
                      but->editstr + but->pos);
@@ -2062,6 +2066,13 @@ static void widget_draw_text(const uiFontStyle *fstyle,
                  rect->ymax - U.pixelsize);
 
         immUnbindProgram();
+
+#ifdef WITH_INPUT_IME
+        /* ime candidate window use selection position */
+        ime_candidatewin_use_cursor_pos = false;
+        ime_candidatewin_x = rect->xmin + selsta_draw;
+        ime_candidatewin_y = rect->ymin + U.pixelsize;
+#endif
       }
     }
 
@@ -2110,12 +2121,15 @@ static void widget_draw_text(const uiFontStyle *fstyle,
     }
 
 #ifdef WITH_INPUT_IME
-    if (ime_data && ime_data->composite_len) {
-      /* ime cursor following */
-      if (but->pos >= but->ofs) {
-        ui_but_ime_reposition(but, but_cursor_shape.xmax + 5, but_cursor_shape.ymin + 3, false);
+    /* ime cursor following */
+    if (but->pos >= but->ofs) {
+      if (ime_candidatewin_use_cursor_pos) {
+        ime_candidatewin_x = but_cursor_shape.xmax + 5;
+        ime_candidatewin_y = but_cursor_shape.ymin + 3;
       }
-
+      ui_but_ime_reposition(but, ime_candidatewin_x, ime_candidatewin_y, false);
+    }
+    if (ime_data && ime_data->composite_len) {
       /* composite underline */
       widget_draw_text_ime_underline(fstyle, wcol, but, rect, ime_data, drawstr);
     }
