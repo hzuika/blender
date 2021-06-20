@@ -37,6 +37,8 @@
 
   bool composing;
   NSString *composing_text;
+  NSString *result_text;
+  NSRange selectionRange;
 
   bool immediate_draw;
 
@@ -44,6 +46,9 @@
   bool use_ime;
   bool ime_is_composing;
   bool input_is_focused;
+  bool ime_event_is_result;
+  bool ime_event_is_composition;
+  bool ime_event_is_composition_start;
   NSRect ime_candidatewin_pos;
   GHOST_TEventImeData eventImeData;
 #endif
@@ -72,6 +77,7 @@
 
   composing = false;
   composing_text = nil;
+  result_text = nil;
 
   immediate_draw = false;
 
@@ -79,6 +85,9 @@
   use_ime = false;
   ime_is_composing = false;
   input_is_focused = false;
+  ime_event_is_result = false;
+  ime_event_is_composition = false;
+  ime_event_is_composition_start = false;
   ime_candidatewin_pos = NSZeroRect;
   NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
   [center addObserver:self
@@ -122,6 +131,82 @@
 
     // interpret event to call insertText
     [self interpretKeyEvents:[NSArray arrayWithObject: event]];  // calls insertText
+
+    // if (use_ime) {
+    //   if (result_text) {
+    //     NSLog(@"result_text");
+    //     size_t result_len;
+    //     char *result_buff = [self convertNSStringToChars:result_text outlen_ptr:&result_len];
+    //     eventImeData.result_len = (GHOST_TUserDataPtr)result_len;
+    //     eventImeData.result = (GHOST_TUserDataPtr)result_buff;
+    //     NSLog(@"after result_text");
+    //   }
+    //   else {
+    //     eventImeData.result_len = 0;
+    //     eventImeData.result = 0;
+    //   }
+    //   if (composing_text) {
+    //     NSString *compositeString = (NSString *)[composing_text string];
+    //     size_t composite_len;
+    //     char *composite_buff = [self convertNSStringToChars:compositeString outlen_ptr:&composite_len];
+    //     int cursor_position, target_start, target_end;
+    //     [self getImeCursorPosAndTargetRange:compositeString selectedRange:selectionRange
+    //                         outCursorPosPtr:&cursor_position
+    //                       outTargetStartPtr:&target_start
+    //                         outTargetEndPtr:&target_end];
+    //     eventImeData.composite_len = (GHOST_TUserDataPtr)composite_len;
+    //     eventImeData.composite = (GHOST_TUserDataPtr)composite_buff;
+    //     eventImeData.cursor_position = cursor_position;
+    //     eventImeData.target_start = target_start;
+    //     eventImeData.target_end = target_end;
+    //   }
+    //   else {
+    //     eventImeData.composite_len = 0;
+    //     eventImeData.composite = 0;
+    //     eventImeData.cursor_position = -1;
+    //     eventImeData.target_start = -1;
+    //     eventImeData.target_end = -1;
+    //   }
+
+    //   if (composing_text && !ime_is_composing) {
+    //     ime_is_composing = true;
+    //     [self processImeEvent:GHOST_kEventImeCompositionStart];
+    //   }
+
+    //   [self processImeEvent:GHOST_kEventImeComposition];
+
+    //   if (result_text) {
+    //     ime_is_composing = false;
+    //     [self processImeEvent:GHOST_kEventImeCompositionEnd];
+    //   }
+    //   NSLog(@"after event");
+    //   printf("composite, %s\n", eventImeData.composite);
+    //   printf("result,    %s\n", eventImeData.result);
+    // }
+#ifdef WITH_INPUT_IME
+    if (use_ime) {
+      if (ime_event_is_composition_start) {
+        [self processImeEvent:GHOST_kEventImeCompositionStart];
+        ime_event_is_composition_start = false;
+      }
+      if (ime_event_is_result) {
+        [self processImeEvent:GHOST_kEventImeComposition];
+        [self processImeEvent:GHOST_kEventImeCompositionEnd];
+      } else {
+        eventImeData.composite_len = NULL;
+        eventImeData.composite = NULL;
+        eventImeData.cursor_position = -1;
+        eventImeData.target_start = -1;
+        eventImeData.target_end = -1;
+      }
+      if (ime_event_is_composition) {
+        [self processImeEvent:GHOST_kEventImeComposition];
+      } else {
+        eventImeData.result_len = NULL;
+        eventImeData.result = NULL;
+      }
+    }
+#endif
     return;
   }
 
@@ -250,17 +335,36 @@
   }
 }
 
+- (void)result_free
+{
+  if (result_text) {
+    [result_text release];
+    result_text = nil;
+  }
+}
+
 - (void)insertText:(id)chars replacementRange:(NSRange)replacementRange
 {
+  NSLog(@"insertText");
   [self composing_free];
+  [self result_free];
+  if ([chars length] == 0)
+    return;
+
+  result_text = [chars copy];
+
+  // if empty, cancel
+  if ([result_text length] == 0)
+    [self result_free];
+
 #ifdef WITH_INPUT_IME
   if (ime_is_composing) {
     size_t temp_buff_len;
     char *temp_buff = [self convertNSStringToChars:(NSString *)chars outlen_ptr:&temp_buff_len];
-    [self setEventImeResultData:temp_buff result_len:temp_buff_len];
+    ime_event_is_result = [self setEventImeResultData:temp_buff result_len:temp_buff_len];
 
-    [self processImeEvent:GHOST_kEventImeComposition];
-    [self processImeEvent:GHOST_kEventImeCompositionEnd];
+    // [self processImeEvent:GHOST_kEventImeComposition];
+    // [self processImeEvent:GHOST_kEventImeCompositionEnd];
 
     ime_is_composing = false;
   }
@@ -270,6 +374,8 @@
 - (void)setMarkedText:(id)chars selectedRange:(NSRange)range replacementRange:(NSRange)replacementRange
 {
   [self composing_free];
+  [self result_free];
+  selectionRange = range;
   if ([chars length] == 0) {
 #ifdef WITH_INPUT_IME
     /* When the last composition string is deleted */
@@ -277,8 +383,8 @@
       [self setEventImeCompositionDeleteData];
       [self processImeEvent:GHOST_kEventImeComposition];
       [self processImeEvent:GHOST_kEventImeCompositionEnd];
-      ime_is_composing = false;
     }
+    ime_is_composing = false;
 #endif
     return;
   }
@@ -306,9 +412,13 @@
                       outTargetStartPtr:&target_start
                         outTargetEndPtr:&target_end];
 
-    [self setEventImeCompositionData:temp_buff composite_len:temp_buff_len cursor_position:cursor_position
-                        target_start:target_start target_end:target_end];
+    ime_event_is_composition = [self setEventImeCompositionData:temp_buff
+                                                  composite_len:temp_buff_len
+                                                cursor_position:cursor_position
+                                                   target_start:target_start
+                                                     target_end:target_end];
     if (ime_is_composing == false) {
+      ime_event_is_composition_start = true;
       ime_is_composing = true;
       [self processImeEvent:GHOST_kEventImeCompositionStart];
     }
@@ -440,36 +550,45 @@
   systemCocoa->pushEvent(event);
 }
 
-- (void)setEventImeCompositionData:(char *)composite_buff
+- (bool)setEventImeCompositionData:(char *)composite_buff
                      composite_len:(size_t)composite_len
                    cursor_position:(int)cursor_position
                       target_start:(int)target_start
                         target_end:(int)target_end
 {
-  eventImeData.result_len = NULL;
-  eventImeData.result = NULL;
+  // eventImeData.result_len = NULL;
+  // eventImeData.result = NULL;
   eventImeData.composite_len = (GHOST_TUserDataPtr)composite_len;
   eventImeData.composite = (GHOST_TUserDataPtr)composite_buff;
   eventImeData.cursor_position = cursor_position;
   eventImeData.target_start = target_start;
   eventImeData.target_end = target_end;
+  return true;
 }
 
-- (void)setEventImeResultData:(char *)result_buff
+- (bool)setEventImeResultData:(char *)result_buff
                    result_len:(size_t)result_len
 {
   eventImeData.result_len = (GHOST_TUserDataPtr)result_len;
-  eventImeData.composite_len = NULL;
   eventImeData.result = (GHOST_TUserDataPtr)result_buff;
-  eventImeData.composite = NULL;
-  eventImeData.cursor_position = -1;
-  eventImeData.target_start = -1;
-  eventImeData.target_end = -1;
+  // eventImeData.composite_len = NULL;
+  // eventImeData.composite = NULL;
+  // eventImeData.cursor_position = -1;
+  // eventImeData.target_start = -1;
+  // eventImeData.target_end = -1;
+  return true;
 }
 
 - (void)setEventImeCompositionDeleteData
 {
-  [self setEventImeResultData:NULL result_len:0];
+  eventImeData.result_len = NULL;
+  eventImeData.result = NULL;
+  eventImeData.composite_len = NULL;
+  eventImeData.composite = NULL;
+  eventImeData.cursor_position = -1;
+  eventImeData.target_start = -1;
+  eventImeData.target_end = -1;
+  // [self setEventImeResultData:NULL result_len:0];
 }
 
 - (char *)convertNSStringToChars:(NSString *)nsstring outlen_ptr:(size_t *)outlen_ptr
