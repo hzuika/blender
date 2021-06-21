@@ -37,7 +37,6 @@
 
   bool composing;
   NSString *composing_text;
-  NSString *result_text;
 
   bool immediate_draw;
 
@@ -78,8 +77,6 @@
 
   composing = false;
   composing_text = nil;
-
-  result_text = nil;
 
   immediate_draw = false;
 
@@ -141,12 +138,6 @@
     [self interpretKeyEvents:[NSArray arrayWithObject: event]];  // calls insertText
 
     NSLog(@"after keyDown");
-    if (composing_text) {
-    }
-    if (result_text) {
-      [result_text release];
-      result_text = nil;
-    }
 
 #ifdef WITH_INPUT_IME
     if ((ime_korean_enabled && ime_result_event && [self eventKeyCodeIsControlChar:event])) {
@@ -290,7 +281,6 @@
   NSLog(@"insertText, %@", chars);
   [self composing_free];
 
-  result_text = [chars copy];
 #ifdef WITH_INPUT_IME
   if (ime_is_composing || (!ime_is_composing && !keyCodeIsControlChar)){
     ime_result_event = true;
@@ -311,6 +301,7 @@
 
     [self processImeEvent:GHOST_kEventImeCompositionEnd];
     NSLog(@"GHOST_kEventImeCompositionEnd");
+    ime_is_composing = false;
   }
 #endif
 }
