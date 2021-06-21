@@ -45,10 +45,9 @@
   bool use_ime;
   bool ime_is_composing;
   bool input_is_focused;
-  bool ime_result_event;
-  bool ime_composition_event;
-  bool ime_composition_is_first;
-  bool ime_korean_enabled;
+  bool ime_result_event; // for korean input method
+  bool ime_composition_event; // for korean input method
+  bool ime_composition_is_first; // for korean input method
   NSRect ime_candidatewin_pos;
   GHOST_TEventImeData eventImeData;
 #endif
@@ -88,7 +87,6 @@
   ime_result_event = false;
   ime_composition_event = false;
   ime_composition_is_first = true;
-  ime_korean_enabled = false;
   ime_candidatewin_pos = NSZeroRect;
   NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
   [center addObserver:self
@@ -111,9 +109,6 @@
 // The trick to prevent Cocoa from complaining (beeping)
 - (void)keyDown:(NSEvent *)event
 {
-  printf("\n");
-  NSLog(@"keyDown start, keyCode %d", [event keyCode]);
-  NSLog(@"event chars %@", [event characters]);
 #ifdef WITH_INPUT_IME
   /* Even if IME is enabled, when not composing, control characters 
    * (such as arrow, enter, delete) are handled by handleKeyEvent. */
@@ -137,10 +132,9 @@
     // interpret event to call insertText
     [self interpretKeyEvents:[NSArray arrayWithObject: event]];  // calls insertText
 
-    NSLog(@"after keyDown");
-
 #ifdef WITH_INPUT_IME
-    if ((ime_korean_enabled && ime_result_event && [self eventKeyCodeIsControlChar:event])) {
+    // for korean input method
+    if ((ime_composition_event && ime_result_event && [self eventKeyCodeIsControlChar:event])) {
       systemCocoa->handleKeyEvent(event);
     }
 #endif
@@ -278,11 +272,10 @@
 
 - (void)insertText:(id)chars replacementRange:(NSRange)replacementRange
 {
-  NSLog(@"insertText, %@", chars);
   [self composing_free];
 
 #ifdef WITH_INPUT_IME
-  if (ime_is_composing || (!ime_is_composing && !keyCodeIsControlChar)){
+  if (ime_is_composing || (!ime_is_composing && !keyCodeIsControlChar) /* for chinese & korean symbol char */){
     ime_result_event = true;
     size_t temp_buff_len;
     char *temp_buff = [self convertNSStringToChars:(NSString *)chars outlen_ptr:&temp_buff_len];
@@ -290,17 +283,14 @@
 
     if (ime_is_composing == false) {
       [self processImeEvent:GHOST_kEventImeCompositionStart];
-      NSLog(@"GHOST_kEventImeCompositionStart");
     }
 
     if (ime_composition_is_first) {
       ime_composition_is_first  = false;
       [self processImeEvent:GHOST_kEventImeComposition];
-      NSLog(@"GHOST_kEventImeComposition (result)");
     }
 
     [self processImeEvent:GHOST_kEventImeCompositionEnd];
-    NSLog(@"GHOST_kEventImeCompositionEnd");
     ime_is_composing = false;
   }
 #endif
@@ -308,8 +298,6 @@
 
 - (void)setMarkedText:(id)chars selectedRange:(NSRange)range replacementRange:(NSRange)replacementRange
 {
-  NSLog(@"setMarkedText, %@", chars);
-  NSLog(@"%@", NSStringFromRange(range));
   [self composing_free];
   if ([chars length] == 0) {
 #ifdef WITH_INPUT_IME
@@ -353,13 +341,11 @@
     if (ime_is_composing == false) {
       ime_is_composing = true;
       [self processImeEvent:GHOST_kEventImeCompositionStart];
-      NSLog(@"GHOST_kEventImeCompositionStart");
     }
 
     if (ime_composition_is_first) {
       ime_composition_is_first  = false;
       [self processImeEvent:GHOST_kEventImeComposition];
-      NSLog(@"GHOST_kEventImeComposition (composition)");
     }
   }
 #endif
@@ -431,12 +417,6 @@
   TISInputSourceRef currentKeyboardInputSource = TISCopyCurrentKeyboardInputSource();
   bool ime_is_enabled = !CFBooleanGetValue((CFBooleanRef)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceIsASCIICapable));
 
-  NSArray *langs = (NSArray *)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceLanguages);
-  if ([langs containsObject: @"ko"]) {
-    ime_korean_enabled = true;
-  } else {
-    ime_korean_enabled = false;
-  }
   use_ime = (input_is_focused && ime_is_enabled);
 
   CFRelease(currentKeyboardInputSource);
@@ -501,6 +481,7 @@
                       target_start:(int)target_start
                         target_end:(int)target_end
 {
+  // for korean input method
   if (!ime_result_event) {
     eventImeData.result_len = NULL;
     eventImeData.result = NULL;
@@ -517,7 +498,6 @@
 {
   eventImeData.result_len = (GHOST_TUserDataPtr)result_len;
   eventImeData.result = (GHOST_TUserDataPtr)result_buff;
-  // korean is mark(same) -> result(same) -> mark
   eventImeData.composite_len = NULL;
   eventImeData.composite = NULL;
   eventImeData.cursor_position = -1;
@@ -553,18 +533,6 @@
     *cursor_position_ptr = strlen(front_string);
     *target_start_ptr = (*cursor_position_ptr);
     *target_end_ptr = (*target_start_ptr) + strlen(selected_string);
-}
-
--(bool)eventCharacterIsAsciiPrintable:(NSEvent *)event
-{
-  int ascii = [[event charactersIgnoringModifiers] characterAtIndex:0];
-  return (ascii <= '~' && ascii >= '!');
-}
-
--(bool)eventCharacterIsAsciiControl:(NSString *)aString
-{
-  int ascii = [aString characterAtIndex:0];
-  return (ascii <= 0x1F || ascii == 0x7F);
 }
 
 -(bool)eventKeyCodeIsControlChar:(NSEvent *)event

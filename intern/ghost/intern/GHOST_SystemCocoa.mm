@@ -1846,11 +1846,6 @@ GHOST_TSuccess GHOST_SystemCocoa::handleKeyEvent(void *eventPtr)
       }
 
       if ([event type] == NSEventTypeKeyDown) {
-        if (!utf8_buf[0]) {
-          // NSLog(@"handleKeyEvent, no utf8_buf");
-        } else if (utf8_buf[0] <= 0x1F || utf8_buf[0] == 0x7F) {
-          // NSLog(@"handleKeyEvent, utf8 is control char");
-        }
         pushEvent(new GHOST_EventKey([event timestamp] * 1000,
                                      GHOST_kEventKeyDown,
                                      window,
