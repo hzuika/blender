@@ -37,13 +37,19 @@
 
   bool composing;
   NSString *composing_text;
+  NSString *result_text;
 
   bool immediate_draw;
 
 #ifdef WITH_INPUT_IME
+  bool keyCodeIsControlChar;
   bool use_ime;
   bool ime_is_composing;
   bool input_is_focused;
+  bool ime_result_event;
+  bool ime_composition_event;
+  bool ime_composition_is_first;
+  bool ime_korean_enabled;
   NSRect ime_candidatewin_pos;
   GHOST_TEventImeData eventImeData;
 #endif
@@ -73,12 +79,19 @@
   composing = false;
   composing_text = nil;
 
+  result_text = nil;
+
   immediate_draw = false;
 
 #ifdef WITH_INPUT_IME
+  keyCodeIsControlChar = false;
   use_ime = false;
   ime_is_composing = false;
   input_is_focused = false;
+  ime_result_event = false;
+  ime_composition_event = false;
+  ime_composition_is_first = true;
+  ime_korean_enabled = false;
   ime_candidatewin_pos = NSZeroRect;
   NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
   [center addObserver:self
@@ -101,10 +114,14 @@
 // The trick to prevent Cocoa from complaining (beeping)
 - (void)keyDown:(NSEvent *)event
 {
+  printf("\n");
+  NSLog(@"keyDown start, keyCode %d", [event keyCode]);
+  NSLog(@"event chars %@", [event characters]);
 #ifdef WITH_INPUT_IME
   /* Even if IME is enabled, when not composing, control characters 
    * (such as arrow, enter, delete) are handled by handleKeyEvent. */
-  if (!use_ime || (!ime_is_composing && ![self eventCharacterIsAsciiDrawable:event])) {
+  keyCodeIsControlChar = [self eventKeyCodeIsControlChar:event];
+  if (!use_ime || (!ime_is_composing && keyCodeIsControlChar)) {
 #endif
     systemCocoa->handleKeyEvent(event);
 #ifdef WITH_INPUT_IME
@@ -122,6 +139,24 @@
 
     // interpret event to call insertText
     [self interpretKeyEvents:[NSArray arrayWithObject: event]];  // calls insertText
+
+    NSLog(@"after keyDown");
+    if (composing_text) {
+    }
+    if (result_text) {
+      [result_text release];
+      result_text = nil;
+    }
+
+#ifdef WITH_INPUT_IME
+    if ((ime_korean_enabled && ime_result_event && [self eventKeyCodeIsControlChar:event])) {
+      systemCocoa->handleKeyEvent(event);
+    }
+#endif
+    ime_composition_event = false;
+    ime_result_event = false;
+    ime_composition_is_first = true;
+
     return;
   }
 
@@ -252,23 +287,38 @@
 
 - (void)insertText:(id)chars replacementRange:(NSRange)replacementRange
 {
+  NSLog(@"insertText, %@", chars);
   [self composing_free];
+
+  result_text = [chars copy];
 #ifdef WITH_INPUT_IME
-  if (ime_is_composing) {
+  if (ime_is_composing || (!ime_is_composing && !keyCodeIsControlChar)){
+    ime_result_event = true;
     size_t temp_buff_len;
     char *temp_buff = [self convertNSStringToChars:(NSString *)chars outlen_ptr:&temp_buff_len];
     [self setEventImeResultData:temp_buff result_len:temp_buff_len];
 
-    [self processImeEvent:GHOST_kEventImeComposition];
-    [self processImeEvent:GHOST_kEventImeCompositionEnd];
+    if (ime_is_composing == false) {
+      [self processImeEvent:GHOST_kEventImeCompositionStart];
+      NSLog(@"GHOST_kEventImeCompositionStart");
+    }
 
-    ime_is_composing = false;
+    if (ime_composition_is_first) {
+      ime_composition_is_first  = false;
+      [self processImeEvent:GHOST_kEventImeComposition];
+      NSLog(@"GHOST_kEventImeComposition (result)");
+    }
+
+    [self processImeEvent:GHOST_kEventImeCompositionEnd];
+    NSLog(@"GHOST_kEventImeCompositionEnd");
   }
 #endif
 }
 
 - (void)setMarkedText:(id)chars selectedRange:(NSRange)range replacementRange:(NSRange)replacementRange
 {
+  NSLog(@"setMarkedText, %@", chars);
+  NSLog(@"%@", NSStringFromRange(range));
   [self composing_free];
   if ([chars length] == 0) {
 #ifdef WITH_INPUT_IME
@@ -287,32 +337,39 @@
   composing = YES;
   composing_text = [chars copy];
 
+  /* makedText by input method is an instance of NSAttributedString */
+  if ([chars isKindOfClass:[NSAttributedString class]]) {
+    composing_text = [[chars string] copy];
+  }
+
   // if empty, cancel
   if ([composing_text length] == 0)
     [self composing_free];
 
 #ifdef WITH_INPUT_IME
   if (use_ime) {
-    NSString *compositeString = (NSString *)[chars string];
+    ime_composition_event = true;
 
     size_t temp_buff_len;
-    char *temp_buff = [self convertNSStringToChars:compositeString outlen_ptr:&temp_buff_len];
-
-    int cursor_position;
-    int target_start;
-    int target_end;
-    [self getImeCursorPosAndTargetRange:compositeString selectedRange:range
+    char *temp_buff = [self convertNSStringToChars:composing_text outlen_ptr:&temp_buff_len];
+    int cursor_position, target_start, target_end;
+    [self getImeCursorPosAndTargetRange:composing_text selectedRange:range
                         outCursorPosPtr:&cursor_position
                       outTargetStartPtr:&target_start
                         outTargetEndPtr:&target_end];
-
     [self setEventImeCompositionData:temp_buff composite_len:temp_buff_len cursor_position:cursor_position
                         target_start:target_start target_end:target_end];
     if (ime_is_composing == false) {
       ime_is_composing = true;
       [self processImeEvent:GHOST_kEventImeCompositionStart];
+      NSLog(@"GHOST_kEventImeCompositionStart");
     }
-    [self processImeEvent:GHOST_kEventImeComposition];
+
+    if (ime_composition_is_first) {
+      ime_composition_is_first  = false;
+      [self processImeEvent:GHOST_kEventImeComposition];
+      NSLog(@"GHOST_kEventImeComposition (composition)");
+    }
   }
 #endif
 }
@@ -382,6 +439,13 @@
 {
   TISInputSourceRef currentKeyboardInputSource = TISCopyCurrentKeyboardInputSource();
   bool ime_is_enabled = !CFBooleanGetValue((CFBooleanRef)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceIsASCIICapable));
+
+  NSArray *langs = (NSArray *)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceLanguages);
+  if ([langs containsObject: @"ko"]) {
+    ime_korean_enabled = true;
+  } else {
+    ime_korean_enabled = false;
+  }
   use_ime = (input_is_focused && ime_is_enabled);
 
   CFRelease(currentKeyboardInputSource);
@@ -446,8 +510,10 @@
                       target_start:(int)target_start
                         target_end:(int)target_end
 {
-  eventImeData.result_len = NULL;
-  eventImeData.result = NULL;
+  if (!ime_result_event) {
+    eventImeData.result_len = NULL;
+    eventImeData.result = NULL;
+  }
   eventImeData.composite_len = (GHOST_TUserDataPtr)composite_len;
   eventImeData.composite = (GHOST_TUserDataPtr)composite_buff;
   eventImeData.cursor_position = cursor_position;
@@ -459,8 +525,9 @@
                    result_len:(size_t)result_len
 {
   eventImeData.result_len = (GHOST_TUserDataPtr)result_len;
-  eventImeData.composite_len = NULL;
   eventImeData.result = (GHOST_TUserDataPtr)result_buff;
+  // korean is mark(same) -> result(same) -> mark
+  eventImeData.composite_len = NULL;
   eventImeData.composite = NULL;
   eventImeData.cursor_position = -1;
   eventImeData.target_start = -1;
@@ -497,10 +564,64 @@
     *target_end_ptr = (*target_start_ptr) + strlen(selected_string);
 }
 
--(bool)eventCharacterIsAsciiDrawable:(NSEvent *)event
+-(bool)eventCharacterIsAsciiPrintable:(NSEvent *)event
 {
   int ascii = [[event charactersIgnoringModifiers] characterAtIndex:0];
-  return (ascii < '~' && ascii > '!');
+  return (ascii <= '~' && ascii >= '!');
+}
+
+-(bool)eventCharacterIsAsciiControl:(NSString *)aString
+{
+  int ascii = [aString characterAtIndex:0];
+  return (ascii <= 0x1F || ascii == 0x7F);
+}
+
+-(bool)eventKeyCodeIsControlChar:(NSEvent *)event
+{
+  switch ([event keyCode]) {
+    case kVK_ANSI_KeypadEnter:
+    case kVK_ANSI_KeypadClear:
+    case kVK_F1:
+    case kVK_F2:
+    case kVK_F3:
+    case kVK_F4:
+    case kVK_F5:
+    case kVK_F6:
+    case kVK_F7:
+    case kVK_F8:
+    case kVK_F9:
+    case kVK_F10:
+    case kVK_F11:
+    case kVK_F12:
+    case kVK_F13:
+    case kVK_F14:
+    case kVK_F15:
+    case kVK_F16:
+    case kVK_F17:
+    case kVK_F18:
+    case kVK_F19:
+    case kVK_F20:
+    case kVK_UpArrow:
+    case kVK_DownArrow:
+    case kVK_LeftArrow:
+    case kVK_RightArrow:
+    case kVK_Return:
+    case kVK_Delete:
+    case kVK_ForwardDelete:
+    case kVK_Escape:
+    case kVK_Tab:
+    case kVK_Space:
+    case kVK_Home:
+    case kVK_End:
+    case kVK_PageUp:
+    case kVK_PageDown:
+    case kVK_VolumeUp:
+    case kVK_VolumeDown:
+    case kVK_Mute:
+      return true;
+    default:
+      return false;
+  }
 }
 
 #endif /* WITH_INPUT_IME */

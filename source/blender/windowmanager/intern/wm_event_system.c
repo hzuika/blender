@@ -4871,6 +4871,8 @@ void wm_event_add_ghostevent(wmWindowManager *wm, wmWindow *win, int type, void 
     case GHOST_kEventImeComposition: {
       event.val = KM_PRESS;
       event.type = WM_IME_COMPOSITE_EVENT;
+      printf("wm event, composite,  %s\n", win->ime_data->str_composite);
+      printf("wm event, result,   %s\n", win->ime_data->str_result);
       wm_event_add(win, &event);
       break;
     }
