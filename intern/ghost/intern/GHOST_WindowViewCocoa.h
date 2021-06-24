@@ -127,6 +127,7 @@
     if (((imeStateFlag & ControlCharForKorean) == ControlCharForKorean)) {
       systemCocoa->handleKeyEvent(event);
     }
+
     imeStateFlag &= (~IME_REDUNDANT_COMPOSITION);
     imeStateFlag &= (~IME_COMPOSITION_EVENT);
     imeStateFlag &= (~IME_RESULT_EVENT);
@@ -134,7 +135,6 @@
 
     return;
   }
-
 }
 
 - (void)keyUp:(NSEvent *)event
@@ -267,15 +267,13 @@
 #ifdef WITH_INPUT_IME
   if ([self ime_is_enabled]) {
     imeStateFlag |= IME_RESULT_EVENT;
-    size_t temp_buff_len;
-    char *temp_buff = [self convertNSStringToChars:(NSString *)chars outlen_ptr:&temp_buff_len];
-    [self setEventImeResultData:temp_buff result_len:temp_buff_len];
 
     if (![self ime_is_composing]) {
       [self processImeEvent:GHOST_kEventImeCompositionStart];
     }
 
-    [self processFirstImeComposition];
+    [self setImeResult:chars];
+    [self processImeComposition];
 
     [self processImeEvent:GHOST_kEventImeCompositionEnd];
     imeStateFlag &= (~IME_COMPOSING);
@@ -290,7 +288,7 @@
 #ifdef WITH_INPUT_IME
     /* When the last composition string is deleted */
     if ([self ime_is_composing]) {
-      [self setEventImeCompositionDeleteData];
+      [self deleteImeComposition];
       [self processImeEvent:GHOST_kEventImeComposition];
       [self processImeEvent:GHOST_kEventImeCompositionEnd];
       imeStateFlag &= (~IME_COMPOSING);
@@ -316,22 +314,13 @@
   if ([self ime_is_enabled]) {
     imeStateFlag |= IME_COMPOSITION_EVENT;
 
-    size_t temp_buff_len;
-    char *temp_buff = [self convertNSStringToChars:composing_text outlen_ptr:&temp_buff_len];
-    int cursor_position, target_start, target_end;
-    [self getImeCursorPosAndTargetRange:composing_text selectedRange:range
-                        outCursorPosPtr:&cursor_position
-                      outTargetStartPtr:&target_start
-                        outTargetEndPtr:&target_end];
-    [self setEventImeCompositionData:temp_buff composite_len:temp_buff_len cursor_position:cursor_position
-                        target_start:target_start target_end:target_end];
-
     if (![self ime_is_composing]) {
       imeStateFlag |= IME_COMPOSING;
       [self processImeEvent:GHOST_kEventImeCompositionStart];
     }
 
-    [self processFirstImeComposition];
+    [self setImeComposition:composing_text selectedRange:range];
+    [self processImeComposition];
   }
 #endif
 }
@@ -399,8 +388,6 @@
 #ifdef WITH_INPUT_IME
 - (void)checkImeEnabled
 {
-
-  printf("check IME\n");
   if (imeStateFlag & INPUT_FOCUSED) {
     TISInputSourceRef currentKeyboardInputSource = TISCopyCurrentKeyboardInputSource();
     bool ime_enabled = !CFBooleanGetValue((CFBooleanRef)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceIsASCIICapable));
@@ -420,7 +407,6 @@
 
 - (void)ImeDidChangeCallback:(NSNotification*)notification 
 {
-  printf("Callback\n");
   [self checkImeEnabled];
 }
 
@@ -450,16 +436,19 @@
 - (void)endIME
 {
   imeStateFlag = 0;
+
   eventImeData.result_len = NULL;
   if (eventImeData.result) {
     free(eventImeData.result);
   }
   eventImeData.result = NULL;
+
   eventImeData.composite_len = NULL;
   if (eventImeData.composite) {
     free(eventImeData.composite);
   }
   eventImeData.composite = NULL;
+
   [self unmarkText];
   [[NSTextInputContext currentInputContext] discardMarkedText];
 }
@@ -470,13 +459,31 @@
   systemCocoa->pushEvent(event);
 }
 
+- (void)setImeComposition:(NSString *)inString
+                  selectedRange:(NSRange)range
+{
+    size_t temp_buff_len;
+    char *temp_buff = [self convertNSStringToChars:inString outlen_ptr:&temp_buff_len];
+    int cursor_position, target_start, target_end;
+    [self getImeCursorPosAndTargetRange:inString 
+                          selectedRange:range
+                        outCursorPosPtr:&cursor_position
+                      outTargetStartPtr:&target_start
+                        outTargetEndPtr:&target_end];
+    [self setEventImeCompositionData:temp_buff 
+                       composite_len:temp_buff_len 
+                     cursor_position:cursor_position
+                        target_start:target_start 
+                          target_end:target_end];
+}
+
 - (void)setEventImeCompositionData:(char *)composite_buff
                      composite_len:(size_t)composite_len
                    cursor_position:(int)cursor_position
                       target_start:(int)target_start
                         target_end:(int)target_end
 {
-  // for korean input method
+  // For Korean input, both "Result Event" and "Composition Event" can occur in a single keyDown.
   if (!(imeStateFlag & IME_RESULT_EVENT)) {
     eventImeData.result_len = NULL;
     eventImeData.result = NULL;
@@ -486,6 +493,13 @@
   eventImeData.cursor_position = cursor_position;
   eventImeData.target_start = target_start;
   eventImeData.target_end = target_end;
+}
+
+- (void)setImeResult:(NSString *)inString
+{
+  size_t temp_buff_len;
+  char *temp_buff = [self convertNSStringToChars:inString outlen_ptr:&temp_buff_len];
+  [self setEventImeResultData:temp_buff result_len:temp_buff_len];
 }
 
 - (void)setEventImeResultData:(char *)result_buff
@@ -500,14 +514,14 @@
   eventImeData.target_end = -1;
 }
 
-- (void)setEventImeCompositionDeleteData
+- (void)deleteImeComposition
 {
   [self setEventImeResultData:NULL result_len:0];
 }
 
-- (char *)convertNSStringToChars:(NSString *)nsstring outlen_ptr:(size_t *)outlen_ptr
+- (char *)convertNSStringToChars:(NSString *)inString outlen_ptr:(size_t *)outlen_ptr
 {
-  const char* temp_buff = (char *) [nsstring UTF8String];
+  const char* temp_buff = (char *) [inString UTF8String];
   size_t len = (*outlen_ptr) = strlen(temp_buff);
   char *outstr = (char *)malloc(len + 1);
   strncpy((char *)outstr, temp_buff, len);
@@ -528,54 +542,6 @@
     *cursor_position_ptr = strlen(front_string);
     *target_start_ptr = (*cursor_position_ptr);
     *target_end_ptr = (*target_start_ptr) + strlen(selected_string);
-}
-
--(bool)eventKeyCodeIsControlChar:(NSEvent *)event
-{
-  switch ([event keyCode]) {
-    case kVK_ANSI_KeypadEnter:
-    case kVK_ANSI_KeypadClear:
-    case kVK_F1:
-    case kVK_F2:
-    case kVK_F3:
-    case kVK_F4:
-    case kVK_F5:
-    case kVK_F6:
-    case kVK_F7:
-    case kVK_F8:
-    case kVK_F9:
-    case kVK_F10:
-    case kVK_F11:
-    case kVK_F12:
-    case kVK_F13:
-    case kVK_F14:
-    case kVK_F15:
-    case kVK_F16:
-    case kVK_F17:
-    case kVK_F18:
-    case kVK_F19:
-    case kVK_F20:
-    case kVK_UpArrow:
-    case kVK_DownArrow:
-    case kVK_LeftArrow:
-    case kVK_RightArrow:
-    case kVK_Return:
-    case kVK_Delete:
-    case kVK_ForwardDelete:
-    case kVK_Escape:
-    case kVK_Tab:
-    case kVK_Space:
-    case kVK_Home:
-    case kVK_End:
-    case kVK_PageUp:
-    case kVK_PageDown:
-    case kVK_VolumeUp:
-    case kVK_VolumeDown:
-    case kVK_Mute:
-      return true;
-    default:
-      return false;
-  }
 }
 
 - (void)checkKeyCodeIsControlChar:(NSEvent *)event
@@ -643,7 +609,7 @@
   return (imeStateFlag & KEY_CONTROLCHAR);
 }
 
-- (void) processFirstImeComposition
+- (void) processImeComposition
 {
   if (!(imeStateFlag & IME_REDUNDANT_COMPOSITION)) {
     imeStateFlag |= IME_REDUNDANT_COMPOSITION;
