@@ -127,10 +127,10 @@
     if (((imeStateFlag & ControlCharForKorean) == ControlCharForKorean)) {
       systemCocoa->handleKeyEvent(event);
     }
-#endif
     imeStateFlag &= (~IME_REDUNDANT_COMPOSITION);
     imeStateFlag &= (~IME_COMPOSITION_EVENT);
     imeStateFlag &= (~IME_RESULT_EVENT);
+#endif
 
     return;
   }
@@ -266,21 +266,19 @@
 
 #ifdef WITH_INPUT_IME
   if ([self ime_is_enabled]) {
-    if ([self ime_is_composing] || (![self key_is_controlchar]) /* for chinese & korean symbol char */){
-      imeStateFlag |= IME_RESULT_EVENT;
-      size_t temp_buff_len;
-      char *temp_buff = [self convertNSStringToChars:(NSString *)chars outlen_ptr:&temp_buff_len];
-      [self setEventImeResultData:temp_buff result_len:temp_buff_len];
+    imeStateFlag |= IME_RESULT_EVENT;
+    size_t temp_buff_len;
+    char *temp_buff = [self convertNSStringToChars:(NSString *)chars outlen_ptr:&temp_buff_len];
+    [self setEventImeResultData:temp_buff result_len:temp_buff_len];
 
-      if (![self ime_is_composing]) {
-        [self processImeEvent:GHOST_kEventImeCompositionStart];
-      }
-
-      [self processFirstImeComposition];
-
-      [self processImeEvent:GHOST_kEventImeCompositionEnd];
-      imeStateFlag &= (~IME_COMPOSING);
+    if (![self ime_is_composing]) {
+      [self processImeEvent:GHOST_kEventImeCompositionStart];
     }
+
+    [self processFirstImeComposition];
+
+    [self processImeEvent:GHOST_kEventImeCompositionEnd];
+    imeStateFlag &= (~IME_COMPOSING);
   }
 #endif
 }
