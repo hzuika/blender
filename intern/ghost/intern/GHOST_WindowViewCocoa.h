@@ -131,12 +131,6 @@
     imeStateFlag &= (~IME_REDUNDANT_COMPOSITION);
     imeStateFlag &= (~IME_COMPOSITION_EVENT);
     imeStateFlag &= (~IME_RESULT_EVENT);
-    if ([self ime_is_composing]) {
-      NSLog(@"ime composing");
-    }
-    if (composing) {
-      NSLog(@"composing");
-    }
 
     return;
   }
