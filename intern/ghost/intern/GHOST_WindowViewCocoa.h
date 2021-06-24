@@ -41,6 +41,7 @@
   bool immediate_draw;
 
 #ifdef WITH_INPUT_IME
+  NSMutableString *result_text;
   GHOST_ImeStateFlagCocoa imeStateFlag;
   NSRect ime_candidatewin_pos;
   GHOST_TEventImeData eventImeData;
@@ -74,6 +75,7 @@
   immediate_draw = false;
 
 #ifdef WITH_INPUT_IME
+  result_text = nil;
   imeStateFlag = 0;
   ime_candidatewin_pos = NSZeroRect;
 
@@ -131,6 +133,8 @@
 
     imeStateFlag &= (~IME_COMPOSITION_EVENT);
     imeStateFlag &= (~IME_RESULT_EVENT);
+
+    [self result_free];
 #endif
 
     return;
@@ -267,19 +271,26 @@
 
 #ifdef WITH_INPUT_IME
   if ([self ime_is_enabled]) {
-    imeStateFlag |= IME_RESULT_EVENT;
-
     if (![self ime_is_composing]) {
       [self processImeEvent:GHOST_kEventImeCompositionStart];
     }
 
-    [self setImeResult:chars];
+    // For Chinese and Korean input, insertText may be executed twice with a single keyDown.
+    if (imeStateFlag & IME_RESULT_EVENT) {
+      [result_text appendString:chars];
+    }
+    else {
+      result_text = [[NSMutableString alloc] initWithString:chars];
+    }
 
-    /* For Korean input, both "Result Event" and "Composition Event" 
+    [self setImeResult:result_text];
+
+    /* For Korean input, both "Result Event" and "Composition Event"
      * can occur in a single keyDown. */
     if (![self ime_did_composition]) {
       [self processImeEvent:GHOST_kEventImeComposition];
     }
+    imeStateFlag |= IME_RESULT_EVENT;
 
     [self processImeEvent:GHOST_kEventImeCompositionEnd];
     imeStateFlag &= (~IME_COMPOSING);
@@ -590,7 +601,6 @@
     case kVK_ForwardDelete:
     case kVK_Escape:
     case kVK_Tab:
-    case kVK_Space:
     case kVK_Home:
     case kVK_End:
     case kVK_PageUp:
@@ -620,7 +630,7 @@
 
 - (bool)ime_did_composition
 {
-  return (imeStateFlag & IME_COMPOSITION_EVENT);
+  return (imeStateFlag & IME_COMPOSITION_EVENT) || (imeStateFlag & IME_RESULT_EVENT);
 }
 
 /* Even if IME is enabled, when not composing, control characters
@@ -628,6 +638,14 @@
 - (bool)isProcessedByIme
 {
   return ([self ime_is_enabled] && ([self ime_is_composing] || ![self key_is_controlchar]));
+}
+
+- (void)result_free
+{
+  if (result_text) {
+    [result_text release];
+    result_text = nil;
+  }
 }
 #endif /* WITH_INPUT_IME */
 
