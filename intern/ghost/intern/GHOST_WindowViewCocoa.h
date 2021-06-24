@@ -45,7 +45,6 @@
   bool keyCodeIsControlChar;
   bool ime_result_event; // for korean input method
   bool ime_composition_event; // for korean input method
-  bool ime_composition_is_first; // for korean input method
   GHOST_ImeStateFlagCocoa imeStateFlag;
   NSRect ime_candidatewin_pos;
   GHOST_TEventImeData eventImeData;
@@ -82,7 +81,6 @@
   keyCodeIsControlChar = false;
   ime_result_event = false;
   ime_composition_event = false;
-  ime_composition_is_first = true;
   imeStateFlag = 0;
   ime_candidatewin_pos = NSZeroRect;
   NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
@@ -109,14 +107,8 @@
 #ifdef WITH_INPUT_IME
   /* Even if IME is enabled, when not composing, control characters 
    * (such as arrow, enter, delete) are handled by handleKeyEvent. */
-  // keyCodeIsControlChar = [self eventKeyCodeIsControlChar:event];
-  // if ([self eventKeyCodeIsControlChar:event]) {
-  //   imeStateFlag |= KEY_CONTROLCHAR;
-  // } else {
-  //   imeStateFlag &= (~KEY_CONTROLCHAR);
-  // }
   [self checkKeyCodeIsControlChar:event];
-  if (![self ime_is_enabled] || (![self ime_is_composing] && (imeStateFlag & KEY_CONTROLCHAR))) {
+  if (![self ime_is_enabled] || (![self ime_is_composing] && [self key_is_controlchar])) {
 #endif
     systemCocoa->handleKeyEvent(event);
 #ifdef WITH_INPUT_IME
@@ -127,7 +119,7 @@
   if ([[event characters] length] == 0 || [[event charactersIgnoringModifiers] length] == 0 ||
       composing
 #ifdef WITH_INPUT_IME
-      || [self ime_is_enabled]
+      || [self ime_is_enabled] && ([self ime_is_composing] || ![self key_is_controlchar])
 #endif
   ) {
     composing = YES;
@@ -143,10 +135,15 @@
 #endif
     ime_composition_event = false;
     ime_result_event = false;
-    ime_composition_is_first = true;
     imeStateFlag &= (~IME_REDUNDANT_COMPOSITION);
     imeStateFlag &= (~IME_COMPOSITION_EVENT);
     imeStateFlag &= (~IME_RESULT_EVENT);
+    if ([self ime_is_composing]) {
+      NSLog(@"ime composing");
+    }
+    if (composing) {
+      NSLog(@"composing");
+    }
 
     return;
   }
@@ -281,9 +278,8 @@
   [self composing_free];
 
 #ifdef WITH_INPUT_IME
-  // if ([self ime_is_composing]|| (![self ime_is_composing] && !(imeStateFlag & KEY_CONTROLCHAR)) /* for chinese & korean symbol char */){
   if ([self ime_is_enabled]) {
-    if ([self ime_is_composing] || (!(imeStateFlag & KEY_CONTROLCHAR)) /* for chinese & korean symbol char */){
+    if ([self ime_is_composing] || (![self key_is_controlchar]) /* for chinese & korean symbol char */){
       ime_result_event = true;
       imeStateFlag |= IME_RESULT_EVENT;
       size_t temp_buff_len;
@@ -293,6 +289,7 @@
       if (![self ime_is_composing]) {
         [self processImeEvent:GHOST_kEventImeCompositionStart];
       }
+
       [self processFirstImeComposition];
 
       [self processImeEvent:GHOST_kEventImeCompositionEnd];
@@ -345,6 +342,7 @@
                         outTargetEndPtr:&target_end];
     [self setEventImeCompositionData:temp_buff composite_len:temp_buff_len cursor_position:cursor_position
                         target_start:target_start target_end:target_end];
+
     if (![self ime_is_composing]) {
       imeStateFlag |= IME_COMPOSING;
       [self processImeEvent:GHOST_kEventImeCompositionStart];
@@ -468,9 +466,7 @@
 
 - (void)endIME
 {
-  imeStateFlag &= (~IME_COMPOSING);
-  imeStateFlag &= (~INPUT_FOCUSED);
-  imeStateFlag &= (~IME_ENABLED);
+  imeStateFlag = 0;
   eventImeData.result_len = NULL;
   if (eventImeData.result) {
     free(eventImeData.result);
@@ -659,10 +655,14 @@
   return (imeStateFlag & IME_COMPOSING);
 }
 
+- (bool) key_is_controlchar
+{
+  return (imeStateFlag & KEY_CONTROLCHAR);
+}
+
 - (void) processFirstImeComposition
 {
   if (!(imeStateFlag & IME_REDUNDANT_COMPOSITION)) {
-    ime_composition_is_first  = false;
     imeStateFlag |= IME_REDUNDANT_COMPOSITION;
     [self processImeEvent:GHOST_kEventImeComposition];
   }
