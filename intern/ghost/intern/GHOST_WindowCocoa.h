@@ -351,4 +351,16 @@ class GHOST_EventIME : public GHOST_Event {
     this->m_data = customdata;
   }
 };
+
+typedef int GHOST_ImeStateFlagCocoa;
+enum {
+  INPUT_FOCUSED = (1 << 0),
+  IME_ENABLED = (1 << 1),
+  IME_COMPOSING = (1 << 2),
+  KEY_CONTROLCHAR = (1 << 3),
+  KEY_PRINTABLECHAR = (1 << 4),
+  IME_REDUNDANT_COMPOSITION = (1 << 5),
+  IME_COMPOSITION_EVENT = (1 << 6),
+  IME_RESULT_EVENT = (1 << 7)
+};
 #endif

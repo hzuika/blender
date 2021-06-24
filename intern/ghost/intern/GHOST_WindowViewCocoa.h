@@ -22,6 +22,7 @@
 #  import <Carbon/Carbon.h>
 #endif
 
+
 /* NSView subclass for drawing and handling input.
  *
  * COCOA_VIEW_BASE_CLASS will be either NSView or NSOpenGLView depending if
@@ -42,12 +43,10 @@
 
 #ifdef WITH_INPUT_IME
   bool keyCodeIsControlChar;
-  bool use_ime;
-  bool ime_is_composing;
-  bool input_is_focused;
   bool ime_result_event; // for korean input method
   bool ime_composition_event; // for korean input method
   bool ime_composition_is_first; // for korean input method
+  GHOST_ImeStateFlagCocoa imeStateFlag;
   NSRect ime_candidatewin_pos;
   GHOST_TEventImeData eventImeData;
 #endif
@@ -81,12 +80,10 @@
 
 #ifdef WITH_INPUT_IME
   keyCodeIsControlChar = false;
-  use_ime = false;
-  ime_is_composing = false;
-  input_is_focused = false;
   ime_result_event = false;
   ime_composition_event = false;
   ime_composition_is_first = true;
+  imeStateFlag = 0;
   ime_candidatewin_pos = NSZeroRect;
   NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
   [center addObserver:self
@@ -112,8 +109,14 @@
 #ifdef WITH_INPUT_IME
   /* Even if IME is enabled, when not composing, control characters 
    * (such as arrow, enter, delete) are handled by handleKeyEvent. */
-  keyCodeIsControlChar = [self eventKeyCodeIsControlChar:event];
-  if (!use_ime || (!ime_is_composing && keyCodeIsControlChar)) {
+  // keyCodeIsControlChar = [self eventKeyCodeIsControlChar:event];
+  // if ([self eventKeyCodeIsControlChar:event]) {
+  //   imeStateFlag |= KEY_CONTROLCHAR;
+  // } else {
+  //   imeStateFlag &= (~KEY_CONTROLCHAR);
+  // }
+  [self checkKeyCodeIsControlChar:event];
+  if (![self ime_is_enabled] || (![self ime_is_composing] && (imeStateFlag & KEY_CONTROLCHAR))) {
 #endif
     systemCocoa->handleKeyEvent(event);
 #ifdef WITH_INPUT_IME
@@ -124,7 +127,7 @@
   if ([[event characters] length] == 0 || [[event charactersIgnoringModifiers] length] == 0 ||
       composing
 #ifdef WITH_INPUT_IME
-      || use_ime
+      || [self ime_is_enabled]
 #endif
   ) {
     composing = YES;
@@ -141,6 +144,9 @@
     ime_composition_event = false;
     ime_result_event = false;
     ime_composition_is_first = true;
+    imeStateFlag &= (~IME_REDUNDANT_COMPOSITION);
+    imeStateFlag &= (~IME_COMPOSITION_EVENT);
+    imeStateFlag &= (~IME_RESULT_EVENT);
 
     return;
   }
@@ -275,23 +281,23 @@
   [self composing_free];
 
 #ifdef WITH_INPUT_IME
-  if (ime_is_composing || (!ime_is_composing && !keyCodeIsControlChar) /* for chinese & korean symbol char */){
-    ime_result_event = true;
-    size_t temp_buff_len;
-    char *temp_buff = [self convertNSStringToChars:(NSString *)chars outlen_ptr:&temp_buff_len];
-    [self setEventImeResultData:temp_buff result_len:temp_buff_len];
+  // if ([self ime_is_composing]|| (![self ime_is_composing] && !(imeStateFlag & KEY_CONTROLCHAR)) /* for chinese & korean symbol char */){
+  if ([self ime_is_enabled]) {
+    if ([self ime_is_composing] || (!(imeStateFlag & KEY_CONTROLCHAR)) /* for chinese & korean symbol char */){
+      ime_result_event = true;
+      imeStateFlag |= IME_RESULT_EVENT;
+      size_t temp_buff_len;
+      char *temp_buff = [self convertNSStringToChars:(NSString *)chars outlen_ptr:&temp_buff_len];
+      [self setEventImeResultData:temp_buff result_len:temp_buff_len];
 
-    if (ime_is_composing == false) {
-      [self processImeEvent:GHOST_kEventImeCompositionStart];
+      if (![self ime_is_composing]) {
+        [self processImeEvent:GHOST_kEventImeCompositionStart];
+      }
+      [self processFirstImeComposition];
+
+      [self processImeEvent:GHOST_kEventImeCompositionEnd];
+      imeStateFlag &= (~IME_COMPOSING);
     }
-
-    if (ime_composition_is_first) {
-      ime_composition_is_first  = false;
-      [self processImeEvent:GHOST_kEventImeComposition];
-    }
-
-    [self processImeEvent:GHOST_kEventImeCompositionEnd];
-    ime_is_composing = false;
   }
 #endif
 }
@@ -302,11 +308,11 @@
   if ([chars length] == 0) {
 #ifdef WITH_INPUT_IME
     /* When the last composition string is deleted */
-    if (ime_is_composing) {
+    if ([self ime_is_composing]) {
       [self setEventImeCompositionDeleteData];
       [self processImeEvent:GHOST_kEventImeComposition];
       [self processImeEvent:GHOST_kEventImeCompositionEnd];
-      ime_is_composing = false;
+      imeStateFlag &= (~IME_COMPOSING);
     }
 #endif
     return;
@@ -326,8 +332,9 @@
     [self composing_free];
 
 #ifdef WITH_INPUT_IME
-  if (use_ime) {
+  if ([self ime_is_enabled]) {
     ime_composition_event = true;
+    imeStateFlag |= IME_COMPOSITION_EVENT;
 
     size_t temp_buff_len;
     char *temp_buff = [self convertNSStringToChars:composing_text outlen_ptr:&temp_buff_len];
@@ -338,15 +345,12 @@
                         outTargetEndPtr:&target_end];
     [self setEventImeCompositionData:temp_buff composite_len:temp_buff_len cursor_position:cursor_position
                         target_start:target_start target_end:target_end];
-    if (ime_is_composing == false) {
-      ime_is_composing = true;
+    if (![self ime_is_composing]) {
+      imeStateFlag |= IME_COMPOSING;
       [self processImeEvent:GHOST_kEventImeCompositionStart];
     }
 
-    if (ime_composition_is_first) {
-      ime_composition_is_first  = false;
-      [self processImeEvent:GHOST_kEventImeComposition];
-    }
+    [self processFirstImeComposition];
   }
 #endif
 }
@@ -394,7 +398,7 @@
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange
 {
 #ifdef WITH_INPUT_IME
-  if (use_ime){
+  if ([self ime_is_enabled]){
     return ime_candidatewin_pos;
   }
 #endif
@@ -414,16 +418,28 @@
 #ifdef WITH_INPUT_IME
 - (void)checkImeEnabled
 {
-  TISInputSourceRef currentKeyboardInputSource = TISCopyCurrentKeyboardInputSource();
-  bool ime_is_enabled = !CFBooleanGetValue((CFBooleanRef)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceIsASCIICapable));
 
-  use_ime = (input_is_focused && ime_is_enabled);
+  printf("check IME\n");
+  if (imeStateFlag & INPUT_FOCUSED) {
+    TISInputSourceRef currentKeyboardInputSource = TISCopyCurrentKeyboardInputSource();
+    bool ime_enabled = !CFBooleanGetValue((CFBooleanRef)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceIsASCIICapable));
+    CFRelease(currentKeyboardInputSource);
 
-  CFRelease(currentKeyboardInputSource);
+    if (ime_enabled) {
+      imeStateFlag |= IME_ENABLED;
+      return;
+    } else {
+      imeStateFlag &= (~IME_ENABLED);
+      return;
+    }
+  }
+  imeStateFlag &= (~IME_ENABLED);
+  return;
 }
 
 - (void)ImeDidChangeCallback:(NSNotification*)notification 
 {
+  printf("Callback\n");
   [self checkImeEnabled];
 }
 
@@ -445,16 +461,16 @@
        completed:(bool)completed
 {
 
-  input_is_focused = true;
+  imeStateFlag |= INPUT_FOCUSED;
   [self checkImeEnabled];
   [self setImeCandidateWinPos:x y:y w:w h:h];
 }
 
 - (void)endIME
 {
-  use_ime = false;
-  ime_is_composing = false;
-  input_is_focused = false;
+  imeStateFlag &= (~IME_COMPOSING);
+  imeStateFlag &= (~INPUT_FOCUSED);
+  imeStateFlag &= (~IME_ENABLED);
   eventImeData.result_len = NULL;
   if (eventImeData.result) {
     free(eventImeData.result);
@@ -580,6 +596,75 @@
       return true;
     default:
       return false;
+  }
+}
+
+- (void)checkKeyCodeIsControlChar:(NSEvent *)event
+{
+  switch ([event keyCode]) {
+    case kVK_ANSI_KeypadEnter:
+    case kVK_ANSI_KeypadClear:
+    case kVK_F1:
+    case kVK_F2:
+    case kVK_F3:
+    case kVK_F4:
+    case kVK_F5:
+    case kVK_F6:
+    case kVK_F7:
+    case kVK_F8:
+    case kVK_F9:
+    case kVK_F10:
+    case kVK_F11:
+    case kVK_F12:
+    case kVK_F13:
+    case kVK_F14:
+    case kVK_F15:
+    case kVK_F16:
+    case kVK_F17:
+    case kVK_F18:
+    case kVK_F19:
+    case kVK_F20:
+    case kVK_UpArrow:
+    case kVK_DownArrow:
+    case kVK_LeftArrow:
+    case kVK_RightArrow:
+    case kVK_Return:
+    case kVK_Delete:
+    case kVK_ForwardDelete:
+    case kVK_Escape:
+    case kVK_Tab:
+    case kVK_Space:
+    case kVK_Home:
+    case kVK_End:
+    case kVK_PageUp:
+    case kVK_PageDown:
+    case kVK_VolumeUp:
+    case kVK_VolumeDown:
+    case kVK_Mute:
+      imeStateFlag |= KEY_CONTROLCHAR;
+      return;
+    default:
+      imeStateFlag &= (~KEY_CONTROLCHAR);
+      return;
+  }
+}
+
+- (bool) ime_is_enabled
+{
+  return (imeStateFlag & IME_ENABLED);
+}
+
+- (bool) ime_is_composing
+{
+  return (imeStateFlag & IME_COMPOSING);
+}
+
+- (void) processFirstImeComposition
+{
+  if (!(imeStateFlag & IME_REDUNDANT_COMPOSITION)) {
+    ime_composition_is_first  = false;
+    imeStateFlag |= IME_REDUNDANT_COMPOSITION;
+    [self processImeEvent:GHOST_kEventImeComposition];
   }
 }
 
