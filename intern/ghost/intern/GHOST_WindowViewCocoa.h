@@ -275,8 +275,9 @@
 
     [self setImeResult:chars];
 
-    if (!(imeStateFlag & IME_COMPOSITION_EVENT)) {
-      imeStateFlag |= IME_COMPOSITION_EVENT;
+    /* For Korean input, both "Result Event" and "Composition Event" 
+     * can occur in a single keyDown. */
+    if (![self ime_did_composition]) {
       [self processImeEvent:GHOST_kEventImeComposition];
     }
 
