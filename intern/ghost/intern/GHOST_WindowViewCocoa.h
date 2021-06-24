@@ -77,6 +77,9 @@
 #ifdef WITH_INPUT_IME
   imeStateFlag = 0;
   ime_candidatewin_pos = NSZeroRect;
+
+  /* Register a function to be executed when Input Method is changed using 
+   * 'Control + Space' or language-specific keys (such as 'Eisu / Kana' key for Japanese).*/
   NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
   [center addObserver:self
              selector:@selector(ImeDidChangeCallback:)
@@ -99,8 +102,6 @@
 - (void)keyDown:(NSEvent *)event
 {
 #ifdef WITH_INPUT_IME
-  /* Even if IME is enabled, when not composing, control characters 
-   * (such as arrow, enter, delete) are handled by handleKeyEvent. */
   [self checkKeyCodeIsControlChar:event];
   bool ime_process = [self isProcessedByIme];
   if (!ime_process) {
@@ -260,6 +261,7 @@
   }
 }
 
+// Processes the Result String sent from the Input Method.
 - (void)insertText:(id)chars replacementRange:(NSRange)replacementRange
 {
   [self composing_free];
@@ -285,12 +287,13 @@
 #endif
 }
 
+// Processes the Composition String sent from the Input Method.
 - (void)setMarkedText:(id)chars selectedRange:(NSRange)range replacementRange:(NSRange)replacementRange
 {
   [self composing_free];
   if ([chars length] == 0) {
 #ifdef WITH_INPUT_IME
-    // When the last composition string is deleted
+    // Processes when the last Composition String is deleted.
     if ([self ime_is_composing]) {
       [self deleteImeComposition];
       [self processImeEvent:GHOST_kEventImeComposition];
@@ -305,7 +308,7 @@
   composing = YES;
   composing_text = [chars copy];
 
-  // makedText by input method is an instance of NSAttributedString
+  // chars of makedText by Input Method is an instance of NSAttributedString
   if ([chars isKindOfClass:[NSAttributedString class]]) {
     composing_text = [[chars string] copy];
   }
@@ -324,6 +327,7 @@
 
     [self setImeComposition:composing_text selectedRange:range];
 
+    // For Korean input, setMarkedText may be executed twice with a single keyDown.
     if (![self ime_did_composition]) {
       imeStateFlag |= IME_COMPOSITION_EVENT;
       [self processImeEvent:GHOST_kEventImeComposition];
@@ -372,6 +376,7 @@
   return NSMakeRange(0, length);
 }
 
+// Specify the position where the Chinese and Japanese candidate windows are displayed.
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange
 {
 #ifdef WITH_INPUT_IME
@@ -395,7 +400,11 @@
 #ifdef WITH_INPUT_IME
 - (void)checkImeEnabled
 {
+  imeStateFlag &= (~IME_ENABLED);
+
   if (imeStateFlag & INPUT_FOCUSED) {
+    /* Since there are no functions in Cocoa API, 
+     * we will use the functions in the Carbon API. */
     TISInputSourceRef currentKeyboardInputSource = TISCopyCurrentKeyboardInputSource();
     bool ime_enabled = !CFBooleanGetValue((CFBooleanRef)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceIsASCIICapable));
     CFRelease(currentKeyboardInputSource);
@@ -403,12 +412,8 @@
     if (ime_enabled) {
       imeStateFlag |= IME_ENABLED;
       return;
-    } else {
-      imeStateFlag &= (~IME_ENABLED);
-      return;
     }
   }
-  imeStateFlag &= (~IME_ENABLED);
   return;
 }
 
@@ -476,14 +481,14 @@
 
 /* The target string is equivalent to the string in selectedRange of setMarkedText.
  * The cursor is displayed at the beginning of the target string. */
-- (void)getImeCursorPosAndTargetRange:(NSString *)nsstring
+- (void)getImeCursorPosAndTargetRange:(NSString *)inString
                         selectedRange:(NSRange)range
                       outCursorPosPtr:(int *)cursor_position_ptr
                     outTargetStartPtr:(int *)target_start_ptr
                       outTargetEndPtr:(int *)target_end_ptr
 {
-    char *front_string = (char *) [[nsstring substringWithRange: NSMakeRange(0, range.location)] UTF8String];
-    char *selected_string = (char *) [[nsstring substringWithRange: range] UTF8String];
+    char *front_string = (char *) [[inString substringWithRange: NSMakeRange(0, range.location)] UTF8String];
+    char *selected_string = (char *) [[inString substringWithRange: range] UTF8String];
     *cursor_position_ptr = strlen(front_string);
     *target_start_ptr = (*cursor_position_ptr);
     *target_end_ptr = (*target_start_ptr) + strlen(selected_string);
@@ -551,6 +556,7 @@
 
 - (void)checkKeyCodeIsControlChar:(NSEvent *)event
 {
+  imeStateFlag &= (~KEY_CONTROLCHAR);
   switch ([event keyCode]) {
     case kVK_ANSI_KeypadEnter:
     case kVK_ANSI_KeypadClear:
@@ -593,9 +599,6 @@
     case kVK_Mute:
       imeStateFlag |= KEY_CONTROLCHAR;
       return;
-    default:
-      imeStateFlag &= (~KEY_CONTROLCHAR);
-      return;
   }
 }
 
@@ -619,6 +622,8 @@
   return (imeStateFlag & IME_COMPOSITION_EVENT);
 }
 
+/* Even if IME is enabled, when not composing, control characters 
+ * (such as arrow, enter, delete) are handled by handleKeyEvent. */
 - (bool)isProcessedByIme
 {
   return ([self ime_is_enabled] && ([self ime_is_composing] || ![self key_is_controlchar]));
