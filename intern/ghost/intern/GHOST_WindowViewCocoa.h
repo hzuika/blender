@@ -102,7 +102,8 @@
   /* Even if IME is enabled, when not composing, control characters 
    * (such as arrow, enter, delete) are handled by handleKeyEvent. */
   [self checkKeyCodeIsControlChar:event];
-  if (![self ime_is_enabled] || (![self ime_is_composing] && [self key_is_controlchar])) {
+  bool ime_process = [self isProcessedByIme];
+  if (!ime_process) {
 #endif
     systemCocoa->handleKeyEvent(event);
 #ifdef WITH_INPUT_IME
@@ -113,7 +114,7 @@
   if ([[event characters] length] == 0 || [[event charactersIgnoringModifiers] length] == 0 ||
       composing
 #ifdef WITH_INPUT_IME
-      || ([self ime_is_enabled] && ([self ime_is_composing] || ![self key_is_controlchar]))
+      || ime_process
 #endif
   ) {
     composing = YES;
@@ -122,13 +123,12 @@
     [self interpretKeyEvents:[NSArray arrayWithObject: event]];  // calls insertText
 
 #ifdef WITH_INPUT_IME
-    // for korean input method
-    int ControlCharForKorean = (IME_COMPOSITION_EVENT | IME_RESULT_EVENT | KEY_CONTROLCHAR);
-    if (((imeStateFlag & ControlCharForKorean) == ControlCharForKorean)) {
+    // For Korean input, control characters are also processed by handleKeyEvent.
+    int controlCharForKorean = (IME_COMPOSITION_EVENT | IME_RESULT_EVENT | KEY_CONTROLCHAR);
+    if (((imeStateFlag & controlCharForKorean) == controlCharForKorean)) {
       systemCocoa->handleKeyEvent(event);
     }
 
-    imeStateFlag &= (~IME_REDUNDANT_COMPOSITION);
     imeStateFlag &= (~IME_COMPOSITION_EVENT);
     imeStateFlag &= (~IME_RESULT_EVENT);
 #endif
@@ -273,7 +273,11 @@
     }
 
     [self setImeResult:chars];
-    [self processImeComposition];
+
+    if (!(imeStateFlag & IME_COMPOSITION_EVENT)) {
+      imeStateFlag |= IME_COMPOSITION_EVENT;
+      [self processImeEvent:GHOST_kEventImeComposition];
+    }
 
     [self processImeEvent:GHOST_kEventImeCompositionEnd];
     imeStateFlag &= (~IME_COMPOSING);
@@ -286,7 +290,7 @@
   [self composing_free];
   if ([chars length] == 0) {
 #ifdef WITH_INPUT_IME
-    /* When the last composition string is deleted */
+    // When the last composition string is deleted
     if ([self ime_is_composing]) {
       [self deleteImeComposition];
       [self processImeEvent:GHOST_kEventImeComposition];
@@ -301,7 +305,7 @@
   composing = YES;
   composing_text = [chars copy];
 
-  /* makedText by input method is an instance of NSAttributedString */
+  // makedText by input method is an instance of NSAttributedString
   if ([chars isKindOfClass:[NSAttributedString class]]) {
     composing_text = [[chars string] copy];
   }
@@ -312,7 +316,6 @@
 
 #ifdef WITH_INPUT_IME
   if ([self ime_is_enabled]) {
-    imeStateFlag |= IME_COMPOSITION_EVENT;
 
     if (![self ime_is_composing]) {
       imeStateFlag |= IME_COMPOSING;
@@ -320,7 +323,11 @@
     }
 
     [self setImeComposition:composing_text selectedRange:range];
-    [self processImeComposition];
+
+    if (![self ime_did_composition]) {
+      imeStateFlag |= IME_COMPOSITION_EVENT;
+      [self processImeEvent:GHOST_kEventImeComposition];
+    }
   }
 #endif
 }
@@ -415,8 +422,7 @@
                             w:(GHOST_TInt32)w 
                             h:(GHOST_TInt32)h
 {
-  GHOST_TInt32 outX;
-  GHOST_TInt32 outY;
+  GHOST_TInt32 outX, outY;
   associatedWindow->clientToScreen(x, y, outX, outY);
   ime_candidatewin_pos = NSMakeRect((CGFloat)outX, (CGFloat)outY, (CGFloat)w, (CGFloat)h);
 }
@@ -427,7 +433,6 @@
                h:(GHOST_TInt32)h
        completed:(bool)completed
 {
-
   imeStateFlag |= INPUT_FOCUSED;
   [self checkImeEnabled];
   [self setImeCandidateWinPos:x y:y w:w h:h];
@@ -459,22 +464,29 @@
   systemCocoa->pushEvent(event);
 }
 
-- (void)setImeComposition:(NSString *)inString
-                  selectedRange:(NSRange)range
+- (char *)convertNSStringToChars:(NSString *)inString outlen_ptr:(size_t *)outlen_ptr
 {
-    size_t temp_buff_len;
-    char *temp_buff = [self convertNSStringToChars:inString outlen_ptr:&temp_buff_len];
-    int cursor_position, target_start, target_end;
-    [self getImeCursorPosAndTargetRange:inString 
-                          selectedRange:range
-                        outCursorPosPtr:&cursor_position
-                      outTargetStartPtr:&target_start
-                        outTargetEndPtr:&target_end];
-    [self setEventImeCompositionData:temp_buff 
-                       composite_len:temp_buff_len 
-                     cursor_position:cursor_position
-                        target_start:target_start 
-                          target_end:target_end];
+  const char* temp_buff = (char *) [inString UTF8String];
+  size_t len = (*outlen_ptr) = strlen(temp_buff);
+  char *outstr = (char *)malloc(len + 1);
+  strncpy((char *)outstr, temp_buff, len);
+  outstr[len] = '\0'; 
+  return outstr;
+}
+
+/* The target string is equivalent to the string in selectedRange of setMarkedText.
+ * The cursor is displayed at the beginning of the target string. */
+- (void)getImeCursorPosAndTargetRange:(NSString *)nsstring
+                        selectedRange:(NSRange)range
+                      outCursorPosPtr:(int *)cursor_position_ptr
+                    outTargetStartPtr:(int *)target_start_ptr
+                      outTargetEndPtr:(int *)target_end_ptr
+{
+    char *front_string = (char *) [[nsstring substringWithRange: NSMakeRange(0, range.location)] UTF8String];
+    char *selected_string = (char *) [[nsstring substringWithRange: range] UTF8String];
+    *cursor_position_ptr = strlen(front_string);
+    *target_start_ptr = (*cursor_position_ptr);
+    *target_end_ptr = (*target_start_ptr) + strlen(selected_string);
 }
 
 - (void)setEventImeCompositionData:(char *)composite_buff
@@ -495,11 +507,22 @@
   eventImeData.target_end = target_end;
 }
 
-- (void)setImeResult:(NSString *)inString
+- (void)setImeComposition:(NSString *)inString
+                  selectedRange:(NSRange)range
 {
-  size_t temp_buff_len;
-  char *temp_buff = [self convertNSStringToChars:inString outlen_ptr:&temp_buff_len];
-  [self setEventImeResultData:temp_buff result_len:temp_buff_len];
+    size_t temp_buff_len;
+    char *temp_buff = [self convertNSStringToChars:inString outlen_ptr:&temp_buff_len];
+    int cursor_position, target_start, target_end;
+    [self getImeCursorPosAndTargetRange:inString 
+                          selectedRange:range
+                        outCursorPosPtr:&cursor_position
+                      outTargetStartPtr:&target_start
+                        outTargetEndPtr:&target_end];
+    [self setEventImeCompositionData:temp_buff 
+                       composite_len:temp_buff_len 
+                     cursor_position:cursor_position
+                        target_start:target_start 
+                          target_end:target_end];
 }
 
 - (void)setEventImeResultData:(char *)result_buff
@@ -514,34 +537,16 @@
   eventImeData.target_end = -1;
 }
 
+- (void)setImeResult:(NSString *)inString
+{
+  size_t temp_buff_len;
+  char *temp_buff = [self convertNSStringToChars:inString outlen_ptr:&temp_buff_len];
+  [self setEventImeResultData:temp_buff result_len:temp_buff_len];
+}
+
 - (void)deleteImeComposition
 {
   [self setEventImeResultData:NULL result_len:0];
-}
-
-- (char *)convertNSStringToChars:(NSString *)inString outlen_ptr:(size_t *)outlen_ptr
-{
-  const char* temp_buff = (char *) [inString UTF8String];
-  size_t len = (*outlen_ptr) = strlen(temp_buff);
-  char *outstr = (char *)malloc(len + 1);
-  strncpy((char *)outstr, temp_buff, len);
-  outstr[len] = '\0'; 
-  return outstr;
-}
-
-/* The target string is equivalent to the string in selectedRange of setMarkedText. */
-/* The cursor is displayed at the beginning of the target string. */
-- (void)getImeCursorPosAndTargetRange:(NSString *)nsstring
-                        selectedRange:(NSRange)range
-                      outCursorPosPtr:(int *)cursor_position_ptr
-                    outTargetStartPtr:(int *)target_start_ptr
-                      outTargetEndPtr:(int *)target_end_ptr
-{
-    char *front_string = (char *) [[nsstring substringWithRange: NSMakeRange(0, range.location)] UTF8String];
-    char *selected_string = (char *) [[nsstring substringWithRange: range] UTF8String];
-    *cursor_position_ptr = strlen(front_string);
-    *target_start_ptr = (*cursor_position_ptr);
-    *target_end_ptr = (*target_start_ptr) + strlen(selected_string);
 }
 
 - (void)checkKeyCodeIsControlChar:(NSEvent *)event
@@ -594,29 +599,30 @@
   }
 }
 
-- (bool) ime_is_enabled
+- (bool)ime_is_enabled
 {
   return (imeStateFlag & IME_ENABLED);
 }
 
-- (bool) ime_is_composing
+- (bool)ime_is_composing
 {
   return (imeStateFlag & IME_COMPOSING);
 }
 
-- (bool) key_is_controlchar
+- (bool)key_is_controlchar
 {
   return (imeStateFlag & KEY_CONTROLCHAR);
 }
 
-- (void) processImeComposition
+- (bool)ime_did_composition
 {
-  if (!(imeStateFlag & IME_REDUNDANT_COMPOSITION)) {
-    imeStateFlag |= IME_REDUNDANT_COMPOSITION;
-    [self processImeEvent:GHOST_kEventImeComposition];
-  }
+  return (imeStateFlag & IME_COMPOSITION_EVENT);
 }
 
+- (bool)isProcessedByIme
+{
+  return ([self ime_is_enabled] && ([self ime_is_composing] || ![self key_is_controlchar]));
+}
 #endif /* WITH_INPUT_IME */
 
 @end
