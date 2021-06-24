@@ -361,4 +361,4 @@ enum {
   IME_COMPOSITION_EVENT = (1 << 4), // For Korean input
   IME_RESULT_EVENT = (1 << 5) // For Korean input
 };
-#endif
+#endif /* WITH_INPUT_IME */
