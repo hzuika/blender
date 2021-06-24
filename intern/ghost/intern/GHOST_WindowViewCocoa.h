@@ -22,7 +22,6 @@
 #  import <Carbon/Carbon.h>
 #endif
 
-
 /* NSView subclass for drawing and handling input.
  *
  * COCOA_VIEW_BASE_CLASS will be either NSView or NSOpenGLView depending if
@@ -51,9 +50,9 @@
                     windowCocoa:(GHOST_WindowCocoa *)winCocoa;
 
 #ifdef WITH_INPUT_IME
-- (void)beginIME:(GHOST_TInt32)x 
-               y:(GHOST_TInt32)y 
-               w:(GHOST_TInt32)w 
+- (void)beginIME:(GHOST_TInt32)x
+               y:(GHOST_TInt32)y
+               w:(GHOST_TInt32)w
                h:(GHOST_TInt32)h
        completed:(bool)completed;
 
@@ -78,7 +77,7 @@
   imeStateFlag = 0;
   ime_candidatewin_pos = NSZeroRect;
 
-  /* Register a function to be executed when Input Method is changed using 
+  /* Register a function to be executed when Input Method is changed using
    * 'Control + Space' or language-specific keys (such as 'Eisu / Kana' key for Japanese).*/
   NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
   [center addObserver:self
@@ -121,7 +120,7 @@
     composing = YES;
 
     // interpret event to call insertText
-    [self interpretKeyEvents:[NSArray arrayWithObject: event]];  // calls insertText
+    [self interpretKeyEvents:[NSArray arrayWithObject:event]];  // calls insertText
 
 #ifdef WITH_INPUT_IME
     // For Korean input, control characters are also processed by handleKeyEvent.
@@ -288,7 +287,9 @@
 }
 
 // Processes the Composition String sent from the Input Method.
-- (void)setMarkedText:(id)chars selectedRange:(NSRange)range replacementRange:(NSRange)replacementRange
+- (void)setMarkedText:(id)chars
+        selectedRange:(NSRange)range
+     replacementRange:(NSRange)replacementRange
 {
   [self composing_free];
   if ([chars length] == 0) {
@@ -355,7 +356,8 @@
   return composing;
 }
 
-- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range actualRange:(NSRangePointer)actualRange
+- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range
+                                                actualRange:(NSRangePointer)actualRange
 {
   return [[[NSAttributedString alloc] init] autorelease];
 }
@@ -380,7 +382,7 @@
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange
 {
 #ifdef WITH_INPUT_IME
-  if ([self ime_is_enabled]){
+  if ([self ime_is_enabled]) {
     return ime_candidatewin_pos;
   }
 #endif
@@ -403,10 +405,11 @@
   imeStateFlag &= (~IME_ENABLED);
 
   if (imeStateFlag & INPUT_FOCUSED) {
-    /* Since there are no functions in Cocoa API, 
+    /* Since there are no functions in Cocoa API,
      * we will use the functions in the Carbon API. */
     TISInputSourceRef currentKeyboardInputSource = TISCopyCurrentKeyboardInputSource();
-    bool ime_enabled = !CFBooleanGetValue((CFBooleanRef)TISGetInputSourceProperty(currentKeyboardInputSource, kTISPropertyInputSourceIsASCIICapable));
+    bool ime_enabled = !CFBooleanGetValue((CFBooleanRef)TISGetInputSourceProperty(
+        currentKeyboardInputSource, kTISPropertyInputSourceIsASCIICapable));
     CFRelease(currentKeyboardInputSource);
 
     if (ime_enabled) {
@@ -417,24 +420,21 @@
   return;
 }
 
-- (void)ImeDidChangeCallback:(NSNotification*)notification 
+- (void)ImeDidChangeCallback:(NSNotification *)notification
 {
   [self checkImeEnabled];
 }
 
-- (void)setImeCandidateWinPos:(GHOST_TInt32)x 
-                            y:(GHOST_TInt32)y 
-                            w:(GHOST_TInt32)w 
-                            h:(GHOST_TInt32)h
+- (void)setImeCandidateWinPos:(GHOST_TInt32)x y:(GHOST_TInt32)y w:(GHOST_TInt32)w h:(GHOST_TInt32)h
 {
   GHOST_TInt32 outX, outY;
   associatedWindow->clientToScreen(x, y, outX, outY);
   ime_candidatewin_pos = NSMakeRect((CGFloat)outX, (CGFloat)outY, (CGFloat)w, (CGFloat)h);
 }
 
-- (void)beginIME:(GHOST_TInt32)x 
-               y:(GHOST_TInt32)y 
-               w:(GHOST_TInt32)w 
+- (void)beginIME:(GHOST_TInt32)x
+               y:(GHOST_TInt32)y
+               w:(GHOST_TInt32)w
                h:(GHOST_TInt32)h
        completed:(bool)completed
 {
@@ -465,17 +465,18 @@
 
 - (void)processImeEvent:(GHOST_TEventType)imeEventType
 {
-  GHOST_Event *event = new GHOST_EventIME(systemCocoa->getMilliSeconds(), imeEventType, associatedWindow, &eventImeData);
+  GHOST_Event *event = new GHOST_EventIME(
+      systemCocoa->getMilliSeconds(), imeEventType, associatedWindow, &eventImeData);
   systemCocoa->pushEvent(event);
 }
 
 - (char *)convertNSStringToChars:(NSString *)inString outlen_ptr:(size_t *)outlen_ptr
 {
-  const char* temp_buff = (char *) [inString UTF8String];
+  const char *temp_buff = (char *)[inString UTF8String];
   size_t len = (*outlen_ptr) = strlen(temp_buff);
   char *outstr = (char *)malloc(len + 1);
   strncpy((char *)outstr, temp_buff, len);
-  outstr[len] = '\0'; 
+  outstr[len] = '\0';
   return outstr;
 }
 
@@ -487,11 +488,12 @@
                     outTargetStartPtr:(int *)target_start_ptr
                       outTargetEndPtr:(int *)target_end_ptr
 {
-    char *front_string = (char *) [[inString substringWithRange: NSMakeRange(0, range.location)] UTF8String];
-    char *selected_string = (char *) [[inString substringWithRange: range] UTF8String];
-    *cursor_position_ptr = strlen(front_string);
-    *target_start_ptr = (*cursor_position_ptr);
-    *target_end_ptr = (*target_start_ptr) + strlen(selected_string);
+  char *front_string = (char *)[[inString substringWithRange:NSMakeRange(0, range.location)]
+      UTF8String];
+  char *selected_string = (char *)[[inString substringWithRange:range] UTF8String];
+  *cursor_position_ptr = strlen(front_string);
+  *target_start_ptr = (*cursor_position_ptr);
+  *target_end_ptr = (*target_start_ptr) + strlen(selected_string);
 }
 
 - (void)setEventImeCompositionData:(char *)composite_buff
@@ -512,26 +514,24 @@
   eventImeData.target_end = target_end;
 }
 
-- (void)setImeComposition:(NSString *)inString
-                  selectedRange:(NSRange)range
+- (void)setImeComposition:(NSString *)inString selectedRange:(NSRange)range
 {
-    size_t temp_buff_len;
-    char *temp_buff = [self convertNSStringToChars:inString outlen_ptr:&temp_buff_len];
-    int cursor_position, target_start, target_end;
-    [self getImeCursorPosAndTargetRange:inString 
-                          selectedRange:range
-                        outCursorPosPtr:&cursor_position
-                      outTargetStartPtr:&target_start
-                        outTargetEndPtr:&target_end];
-    [self setEventImeCompositionData:temp_buff 
-                       composite_len:temp_buff_len 
-                     cursor_position:cursor_position
-                        target_start:target_start 
-                          target_end:target_end];
+  size_t temp_buff_len;
+  char *temp_buff = [self convertNSStringToChars:inString outlen_ptr:&temp_buff_len];
+  int cursor_position, target_start, target_end;
+  [self getImeCursorPosAndTargetRange:inString
+                        selectedRange:range
+                      outCursorPosPtr:&cursor_position
+                    outTargetStartPtr:&target_start
+                      outTargetEndPtr:&target_end];
+  [self setEventImeCompositionData:temp_buff
+                     composite_len:temp_buff_len
+                   cursor_position:cursor_position
+                      target_start:target_start
+                        target_end:target_end];
 }
 
-- (void)setEventImeResultData:(char *)result_buff
-                   result_len:(size_t)result_len
+- (void)setEventImeResultData:(char *)result_buff result_len:(size_t)result_len
 {
   eventImeData.result_len = (GHOST_TUserDataPtr)result_len;
   eventImeData.result = (GHOST_TUserDataPtr)result_buff;
@@ -622,7 +622,7 @@
   return (imeStateFlag & IME_COMPOSITION_EVENT);
 }
 
-/* Even if IME is enabled, when not composing, control characters 
+/* Even if IME is enabled, when not composing, control characters
  * (such as arrow, enter, delete) are handled by handleKeyEvent. */
 - (bool)isProcessedByIme
 {

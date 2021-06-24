@@ -267,9 +267,9 @@ class GHOST_WindowCocoa : public GHOST_Window {
   }
 
 #ifdef WITH_INPUT_IME
-    void beginIME(GHOST_TInt32 x, GHOST_TInt32 y, GHOST_TInt32 w, GHOST_TInt32 h, int completed);
+  void beginIME(GHOST_TInt32 x, GHOST_TInt32 y, GHOST_TInt32 w, GHOST_TInt32 h, int completed);
 
-    void endIME();
+  void endIME();
 #endif /* WITH_INPUT_IME */
 
  protected:
@@ -358,7 +358,7 @@ enum {
   IME_ENABLED = (1 << 1),
   IME_COMPOSING = (1 << 2),
   KEY_CONTROLCHAR = (1 << 3),
-  IME_COMPOSITION_EVENT = (1 << 4), // For Korean input
-  IME_RESULT_EVENT = (1 << 5) // For Korean input
+  IME_COMPOSITION_EVENT = (1 << 4),  // For Korean input
+  IME_RESULT_EVENT = (1 << 5)        // For Korean input
 };
 #endif /* WITH_INPUT_IME */
