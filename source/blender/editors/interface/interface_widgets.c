@@ -1970,8 +1970,7 @@ static void widget_draw_text(const uiFontStyle *fstyle,
 #ifdef WITH_INPUT_IME
   const wmIMEData *ime_data;
   bool ime_candidatewin_use_cursor_pos = true;
-  int ime_candidatewin_x;
-  int ime_candidatewin_y;
+  int ime_candidatewin_x, ime_candidatewin_y;
 #endif
 
   UI_fontstyle_set(fstyle);

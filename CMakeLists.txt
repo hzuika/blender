@@ -349,11 +349,10 @@ mark_as_advanced(WITH_SYSTEM_GLOG)
 option(WITH_FREESTYLE     "Enable Freestyle (advanced edges rendering)" ON)
 
 # Misc
-if(WIN32)
+if(WIN32 OR APPLE)
   option(WITH_INPUT_IME "Enable Input Method Editor (IME) for complex Asian character input" ON)
 endif()
 option(WITH_INPUT_NDOF "Enable NDOF input devices (SpaceNavigator and friends)" ON)
-option(WITH_INPUT_IME "Enable Input Method Editor (IME) for complex Asian character input" ON)
 if(UNIX AND NOT APPLE)
   option(WITH_INSTALL_PORTABLE "Install redistributeable runtime, otherwise install into CMAKE_INSTALL_PREFIX" ON)
   option(WITH_STATIC_LIBS "Try to link with static libraries, as much as possible, to make blender more portable across distributions" OFF)
