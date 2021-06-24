@@ -18,7 +18,7 @@
  */
 
 #ifdef WITH_INPUT_IME
-/* The Carbon API is still needed to check if the input source (or IME) is valid. */
+/* The Carbon API is still needed to check if the Input Source (Input Method or IME) is valid. */
 #  import <Carbon/Carbon.h>
 #endif
 
